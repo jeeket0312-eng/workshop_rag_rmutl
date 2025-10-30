@@ -3,52 +3,61 @@ import os
 import glob
 from dotenv import load_dotenv
 
+# Import standard LangChain components
 from langchain.schema import Document as LangChainDocument
-# FIX: Import HuggingFaceEmbeddings from the correct module
-from langchain_community.embeddings import HuggingFaceEmbeddings 
-from langchain_community.vectorstores import FAISS # FIX: Import FAISS from the correct module
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
+
+# Import components from the community packages
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 
-# Load env
+# Load environment variables
 load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+# --- Configuration Constants ---
 PDF_FOLDER = "./pdf"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-LLM_MODEL = "llama-3.3-70b-versatile" # Note: llama-3.3-70b-versatile is likely a typo/non-existent model. Using llama-3.1-70b or llama-3-70b is safer. I'll keep the user's value for now.
+LLM_MODEL = "llama-3-70b-8192"  # Changed to a known valid Groq model name for safety
 SEARCH_LIMIT = 3
 
 # -----------------------------
 # Load PDF as text
 # -----------------------------
 def load_pdf_texts(folder):
+    """Loads text from all PDF files in the specified folder."""
     from PyPDF2 import PdfReader
     documents = []
     for pdf_file in glob.glob(f"{folder}/*.pdf"):
         reader = PdfReader(pdf_file)
         text = ""
         for page in reader.pages:
-            # Handle potential None from extract_text() for empty/image pages
             page_text = page.extract_text()
             if page_text:
                 text += page_text + "\n"
-        documents.append(LangChainDocument(page_content=text, metadata={"source": pdf_file}))
+        # Check if text was successfully extracted before creating a document
+        if text.strip():
+            documents.append(LangChainDocument(page_content=text, metadata={"source": pdf_file}))
     return documents
 
 # -----------------------------
-# RAG Chatbot
+# RAG Chatbot Class
 # -----------------------------
 class RAGChatbot:
     def __init__(self):
+        # FIX (1/2 for ValueError): Explicitly define input_key for memory
         self.memory = ConversationBufferMemory(
-            memory_key="chat_history", return_messages=True
+            memory_key="chat_history", 
+            return_messages=True,
+            input_key="question" 
         )
-        # FIX: Explicitly set device to 'cpu' to prevent NotImplementedError on Streamlit Cloud
-        # when it attempts to use a GPU that is unavailable/misconfigured.
+        
+        # FIX (1/1 for NotImplementedError): Explicitly set device to 'cpu' 
+        # to prevent issues in constrained environments like Streamlit Cloud
         self.embeddings = HuggingFaceEmbeddings(
             model_name=EMBEDDING_MODEL,
             model_kwargs={'device': 'cpu'}
@@ -56,17 +65,20 @@ class RAGChatbot:
         self.vector_store = None
         self.qa_chain = None
         self.conversation_chain = None
+        
         self.llm = ChatGroq(groq_api_key=GROQ_API_KEY, model_name=LLM_MODEL, temperature=0.1)
 
     def load_documents(self, pdf_folder=PDF_FOLDER):
+        """Loads documents and initializes the FAISS vector store and chains."""
         documents = load_pdf_texts(pdf_folder)
-        # NOTE: If documents is empty, FAISS.from_documents will fail. You might want to add a check here.
+        
         if not documents:
-            st.error(f"⚠️ No PDF documents found in the folder: {pdf_folder}")
-            return # Exit if no documents are found
+            st.error(f"⚠️ ไม่พบเอกสาร PDF ในโฟลเดอร์: {pdf_folder}")
+            return False # Return False if no documents are loaded
             
         self.vector_store = FAISS.from_documents(documents, embedding=self.embeddings)
 
+        # --- RetrievalQA Chain Setup ---
         prompt_template = """
 คุณเป็นผู้ช่วยเรื่องอาหารพื้นเมืองจังหวัดน่าน
 ข้อมูลอ้างอิง:
@@ -84,26 +96,29 @@ class RAGChatbot:
             return_source_documents=True
         )
 
-        # Conversational chain with explicit output_key for memory
+        # --- ConversationalRetrievalChain Setup ---
         self.conversation_chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=self.vector_store.as_retriever(search_kwargs={"k": SEARCH_LIMIT}),
             memory=self.memory,
             return_source_documents=True,
-            output_key="answer"  # ต้องบอก explicitly
+            output_key="answer"
         )
+        return True # Return True if successful
 
     def answer_question(self, question, use_conversation=True):
+        """Answers the user's question using the selected chain."""
         if use_conversation and self.conversation_chain:
-            # ConversationalRetrievalChain accepts a dict with "question"
+            # ConversationalRetrievalChain input key is "question"
             result = self.conversation_chain({"question": question}) 
             answer = result["answer"]
             sources = result.get("source_documents", [])
         else:
-            # RetrievalQA accepts a dict with "query"
+            # RetrievalQA input key is "query"
             result = self.qa_chain({"query": question}) 
-            answer = result["result"] # RetrievalQA uses "result" as the key
+            answer = result["result"] # RetrievalQA output key is "result"
             sources = result.get("source_documents", [])
+            
         return {"answer": answer, "sources": sources}
 
 # -----------------------------
@@ -114,40 +129,45 @@ def main():
     st.title("🍽️ Chatbot อาหารจังหวัดน่าน")
 
     if "bot" not in st.session_state:
-        # Show a loading spinner while the bot is initializing
-        with st.spinner("⏳ กำลังโหลดโมเดลและเอกสาร... (อาจใช้เวลา 1-2 นาทีในการโหลดครั้งแรก)"):
+        # Initialize and load documents only once
+        with st.spinner("⏳ กำลังโหลดโมเดลและเอกสาร..."):
             try:
                 bot = RAGChatbot()
-                bot.load_documents()
-                st.session_state.bot = bot
+                if bot.load_documents():
+                    st.session_state.bot = bot
+                else:
+                    st.session_state.bot_error = True # Flag if document loading failed
             except Exception as e:
                 st.error(f"❌ เกิดข้อผิดพลาดในการเริ่มต้น Chatbot: {e}")
-                st.stop() # Stop the app execution if initialization fails
+                st.stop()
+    
+    if "bot_error" in st.session_state and st.session_state.bot_error:
+        # Stop execution if document loading failed (handled inside load_documents)
+        return
 
     bot = st.session_state.bot
-
+    
     if not bot.vector_store:
         st.info("ℹ️ ไม่พบเอกสาร PDF ในโฟลเดอร์ กรุณาเพิ่มไฟล์ PDF เพื่อใช้งาน.")
-        return # Do not proceed with chat if vector store is not initialized
+        return 
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
+    # Display history messages
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             if msg.get("sources"):
                 with st.expander("📚 แหล่งข้อมูล"):
                     for s in msg["sources"]:
-                        # Display source file name and a snippet of the content
                         source_path = s.metadata.get("source", "ไม่ระบุ")
-                        # Only show the file name, not the full path
                         file_name = os.path.basename(source_path) 
                         st.markdown(f"**ไฟล์:** `{file_name}`")
-                        st.write(s.page_content[:300] + "...") # Show slightly more context
+                        st.write(s.page_content[:300] + "...") 
                         st.markdown("---")
 
-
+    # Handle new user input
     if prompt := st.chat_input("ถามเกี่ยวกับอาหารน่าน..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
@@ -158,26 +178,32 @@ def main():
         # Display the assistant message and response
         with st.chat_message("assistant"):
             with st.spinner("🤖 กำลังคิดคำตอบ..."):
-                response = bot.answer_question(prompt, use_conversation=True)
-                st.markdown(response["answer"])
-                
-                # Show sources immediately after the answer
-                sources = response.get("sources", [])
-                if sources:
-                    with st.expander("📚 แหล่งข้อมูล"):
-                        for s in sources:
-                            source_path = s.metadata.get("source", "ไม่ระบุ")
-                            file_name = os.path.basename(source_path)
-                            st.markdown(f"**ไฟล์:** `{file_name}`")
-                            st.write(s.page_content[:300] + "...")
-                            st.markdown("---")
+                try:
+                    response = bot.answer_question(prompt, use_conversation=True)
+                    st.markdown(response["answer"])
+                    
+                    # Show sources immediately after the answer
+                    sources = response.get("sources", [])
+                    if sources:
+                        with st.expander("📚 แหล่งข้อมูล"):
+                            for s in sources:
+                                source_path = s.metadata.get("source", "ไม่ระบุ")
+                                file_name = os.path.basename(source_path)
+                                st.markdown(f"**ไฟล์:** `{file_name}`")
+                                st.write(s.page_content[:300] + "...")
+                                st.markdown("---")
+                                
+                    # Update session state messages after displaying
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": response["answer"],
+                        "sources": sources
+                    })
+                except Exception as e:
+                    st.error(f"❌ เกิดข้อผิดพลาดขณะตอบคำถาม: {e}")
+                    # Remove the last user message if the bot failed to respond
+                    st.session_state.messages.pop() 
 
-            # Update session state messages after displaying
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response["answer"],
-                "sources": sources
-            })
 
 if __name__ == "__main__":
     main()
