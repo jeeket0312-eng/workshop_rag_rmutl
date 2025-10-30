@@ -22,7 +22,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # --- Configuration Constants ---
 PDF_FOLDER = "./pdf"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-LLM_MODEL = "llama-3.1-8b-instant"  # Changed to a known valid Groq model name for safety
+LLM_MODEL = "llama-3.3-70b-versatile"  # Changed to a known valid Groq model name for safety
 SEARCH_LIMIT = 3
 
 # -----------------------------
