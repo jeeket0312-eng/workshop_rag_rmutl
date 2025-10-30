@@ -97,18 +97,28 @@ class FoodRAGChatbot:
         self.setup_qa_chain()
         self.setup_conversation_chain()
 
-    def answer_question(self, question: str, use_conversation=False):
-        if use_conversation and self.conversation_chain:
-            # ใช้ key "query" แทน "question"
-            result = self.conversation_chain.invoke({"query": question})
-            answer = result.get("answer") or result.get("result") or "ไม่พบคำตอบจากโมเดล"
-            source_docs = result.get("source_documents", [])
-        else:
-            result = self.qa_chain.invoke({"query": question})
-            answer = result.get("result") or result.get("answer") or "ไม่พบคำตอบจากโมเดล"
-            source_docs = result.get("source_documents", [])
-        sources = [{"content": d.page_content[:200]+"...", "metadata": d.metadata} for d in source_docs]
-        return {"answer": answer, "sources": sources}
+    def answer_question(self, question: str, use_conversation=True):
+        try:
+            if use_conversation and self.conversation_chain:
+                # ส่ง chat_history ว่างในครั้งแรก
+                history = self.memory.chat_memory.messages if self.memory else []
+                result = self.conversation_chain.invoke({
+                    "question": question,
+                    "chat_history": history
+                })
+                answer = result.get("answer", "ไม่พบคำตอบ")
+                source_docs = result.get("source_documents", [])
+            else:
+                result = self.qa_chain.invoke({"query": question})
+                answer = result.get("result", "ไม่พบคำตอบ")
+                source_docs = result.get("source_documents", [])
+            
+            sources = [{"content": d.page_content[:200]+"...", "metadata": d.metadata} for d in source_docs]
+            return {"answer": answer, "sources": sources}
+    
+        except Exception as e:
+            logger.error(f"Error in answer_question: {e}")
+            raise
 
 
 # ===================== Streamlit UI =====================
