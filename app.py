@@ -97,7 +97,8 @@ class RAGChatbot:
             llm=self.llm,
             retriever=self.vector_store.as_retriever(search_kwargs={"k": Config.SEARCH_LIMIT}),
             memory=self.memory,
-            return_source_documents=True
+            return_source_documents=True,
+            output_key="answer"  
         )
 
     def answer_question(self, question: str, use_conversation: bool = True) -> Dict[str, Any]:
