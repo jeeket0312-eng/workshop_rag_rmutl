@@ -1,8 +1,6 @@
-# app.py - RAG Chatbot สำหรับอาหารจังหวัดน่าน
 import streamlit as st
 import logging
 import os
-import glob
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -11,13 +9,11 @@ from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.memory import ConversationBufferMemory
 from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
 from langchain_groq import ChatGroq
 from docling.document_converter import DocumentConverter
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.datamodel.base_models import InputFormat
-import glob
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -62,11 +58,9 @@ class FoodRAGChatbot:
         self.vector_store = None
         self.qa_chain = None
         self.conversation_chain = None
-        self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         self.llm = ChatGroq(groq_api_key=GROQ_API_KEY, model_name=LLM_MODEL, temperature=0.1)
 
     def create_vector_store(self, document: LangChainDocument):
-        # Split document
         splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
         docs = splitter.split_documents([document])
         self.vector_store = FAISS.from_documents(docs, self.embeddings)
@@ -90,10 +84,10 @@ class FoodRAGChatbot:
         )
 
     def setup_conversation_chain(self):
+        # ปิด memory เพื่อแก้ปัญหา ValueError
         self.conversation_chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=self.vector_store.as_retriever(search_kwargs={"k": SEARCH_LIMIT}),
-            memory=self.memory,
             return_source_documents=True
         )
 
@@ -102,17 +96,18 @@ class FoodRAGChatbot:
         self.create_vector_store(doc)
         self.setup_qa_chain()
         self.setup_conversation_chain()
-        
-     def answer_question(self, question: str, use_conversation=False):
+
+    def answer_question(self, question: str, use_conversation=False):
         if use_conversation and self.conversation_chain:
             result = self.conversation_chain.invoke({"question": question})
-            # บางเวอร์ชันใช้ key 'answer', บางเวอร์ชันใช้ 'result'
             answer = result.get("answer") or result.get("result") or "ไม่พบคำตอบจากโมเดล"
             source_docs = result.get("source_documents", [])
         else:
             result = self.qa_chain.invoke({"query": question})
             answer = result.get("result") or result.get("answer") or "ไม่พบคำตอบจากโมเดล"
             source_docs = result.get("source_documents", [])
+        sources = [{"content": d.page_content[:200]+"...", "metadata": d.metadata} for d in source_docs]
+        return {"answer": answer, "sources": sources}
 
 # ===================== Streamlit UI =====================
 def main():
