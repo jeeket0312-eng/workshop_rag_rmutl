@@ -102,18 +102,17 @@ class FoodRAGChatbot:
         self.create_vector_store(doc)
         self.setup_qa_chain()
         self.setup_conversation_chain()
-
-    def answer_question(self, question: str, use_conversation=False):
+        
+     def answer_question(self, question: str, use_conversation=False):
         if use_conversation and self.conversation_chain:
             result = self.conversation_chain.invoke({"question": question})
-            answer = result["answer"]
+            # บางเวอร์ชันใช้ key 'answer', บางเวอร์ชันใช้ 'result'
+            answer = result.get("answer") or result.get("result") or "ไม่พบคำตอบจากโมเดล"
             source_docs = result.get("source_documents", [])
         else:
             result = self.qa_chain.invoke({"query": question})
-            answer = result["result"]
+            answer = result.get("result") or result.get("answer") or "ไม่พบคำตอบจากโมเดล"
             source_docs = result.get("source_documents", [])
-        sources = [{"content": d.page_content[:200]+"...", "metadata": d.metadata} for d in source_docs]
-        return {"answer": answer, "sources": sources}
 
 # ===================== Streamlit UI =====================
 def main():
