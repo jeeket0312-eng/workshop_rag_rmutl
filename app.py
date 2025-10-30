@@ -11,7 +11,8 @@ from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 
 # Import components from the community packages
-from langchain_community.embeddings import HuggingFaceEmbeddings
+# UPDATE: Use langchain_huggingface for embeddings per deprecation warning
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 
@@ -103,11 +104,13 @@ class RAGChatbot:
     def answer_question(self, question, use_conversation=True):
         """Answers the user's question using the selected chain."""
         if use_conversation and self.conversation_chain:
-            result = self.conversation_chain({"question": question}) 
+            # Updated: use invoke per deprecation warning
+            result = self.conversation_chain.invoke({"question": question}) 
             answer = result["answer"]
             sources = result.get("source_documents", [])
         else:
-            result = self.qa_chain({"query": question}) 
+            # Updated: use invoke per deprecation warning
+            result = self.qa_chain.invoke({"query": question}) 
             answer = result["result"]
             sources = result.get("source_documents", [])
         return {"answer": answer, "sources": sources}
