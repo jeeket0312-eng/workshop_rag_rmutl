@@ -99,7 +99,8 @@ class FoodRAGChatbot:
 
     def answer_question(self, question: str, use_conversation=False):
         if use_conversation and self.conversation_chain:
-            result = self.conversation_chain.invoke({"question": question})
+            # ใช้ key "query" แทน "question"
+            result = self.conversation_chain.invoke({"query": question})
             answer = result.get("answer") or result.get("result") or "ไม่พบคำตอบจากโมเดล"
             source_docs = result.get("source_documents", [])
         else:
@@ -108,6 +109,7 @@ class FoodRAGChatbot:
             source_docs = result.get("source_documents", [])
         sources = [{"content": d.page_content[:200]+"...", "metadata": d.metadata} for d in source_docs]
         return {"answer": answer, "sources": sources}
+
 
 # ===================== Streamlit UI =====================
 def main():
