@@ -22,14 +22,15 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # --- Configuration Constants ---
 PDF_FOLDER = "./pdf"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-LLM_MODEL = "llama-3.3-70b-versatile"  # Changed to a known valid Groq model name for safety
+LLM_MODEL = "llama-3.1-8b-instant"  # Changed to a known valid Groq model name for safety
 SEARCH_LIMIT = 3
+MAX_DOC_LENGTH = 1500  # Added to fix context size
 
 # -----------------------------
 # Load PDF as text
 # -----------------------------
 def load_pdf_texts(folder):
-    """Loads text from all PDF files in the specified folder."""
+    """Loads text from all PDF files in the specified folder and truncates content."""
     from PyPDF2 import PdfReader
     documents = []
     for pdf_file in glob.glob(f"{folder}/*.pdf"):
@@ -39,7 +40,8 @@ def load_pdf_texts(folder):
             page_text = page.extract_text()
             if page_text:
                 text += page_text + "\n"
-        # Check if text was successfully extracted before creating a document
+        # Truncate text if too long
+        text = text[:MAX_DOC_LENGTH]
         if text.strip():
             documents.append(LangChainDocument(page_content=text, metadata={"source": pdf_file}))
     return documents
@@ -49,15 +51,12 @@ def load_pdf_texts(folder):
 # -----------------------------
 class RAGChatbot:
     def __init__(self):
-        # FIX (1/2 for ValueError): Explicitly define input_key for memory
+        # Explicitly define input_key for memory, and restrict chat history size
         self.memory = ConversationBufferMemory(
             memory_key="chat_history", 
             return_messages=True,
-            input_key="question" 
+            input_key="question"
         )
-        
-        # FIX (1/1 for NotImplementedError): Explicitly set device to 'cpu' 
-        # to prevent issues in constrained environments like Streamlit Cloud
         self.embeddings = HuggingFaceEmbeddings(
             model_name=EMBEDDING_MODEL,
             model_kwargs={'device': 'cpu'}
@@ -109,14 +108,12 @@ class RAGChatbot:
     def answer_question(self, question, use_conversation=True):
         """Answers the user's question using the selected chain."""
         if use_conversation and self.conversation_chain:
-            # ConversationalRetrievalChain input key is "question"
             result = self.conversation_chain({"question": question}) 
             answer = result["answer"]
             sources = result.get("source_documents", [])
         else:
-            # RetrievalQA input key is "query"
             result = self.qa_chain({"query": question}) 
-            answer = result["result"] # RetrievalQA output key is "result"
+            answer = result["result"]
             sources = result.get("source_documents", [])
             
         return {"answer": answer, "sources": sources}
@@ -153,6 +150,10 @@ def main():
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
+
+    # Keep only last 5 messages to reduce token usage
+    if len(st.session_state.messages) > 5:
+        st.session_state.messages = st.session_state.messages[-5:]
 
     # Display history messages
     for msg in st.session_state.messages:
@@ -201,7 +202,6 @@ def main():
                     })
                 except Exception as e:
                     st.error(f"❌ เกิดข้อผิดพลาดขณะตอบคำถาม: {e}")
-                    # Remove the last user message if the bot failed to respond
                     st.session_state.messages.pop() 
 
 
