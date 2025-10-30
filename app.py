@@ -19,6 +19,7 @@ from langchain_groq import ChatGroq
 try:
     from PyPDF2 import PdfReader
 except ImportError:
+    # This warning helps the user if the library is missing
     st.error("❌ ต้องติดตั้ง PyPDF2: pip install PyPDF2")
     st.stop()
 
@@ -76,7 +77,7 @@ class RAGChatbot:
         )
         self.embeddings = HuggingFaceEmbeddings(
             model_name=EMBEDDING_MODEL,
-            model_kwargs={'device': 'cpu'} # ใช้ CPU เพื่อความเสถียร
+            model_kwargs={'device': 'cpu'}
         )
         self.vector_store = None
         self.qa_chain = None
@@ -84,7 +85,8 @@ class RAGChatbot:
         
         # ตรวจสอบ API Key ก่อนใช้งาน
         if not GROQ_API_KEY:
-            st.error("❌ กรุณาตั้งค่า GROQ_API_KEY ในไฟล์ .env")
+            # ใช้ st.info แทน st.error เพื่อให้ Streamlit UI ยังทำงานได้หากไม่มี Key
+            st.info("❌ กรุณาตั้งค่า GROQ_API_KEY ในไฟล์ .env") 
             st.stop()
             
         self.llm = ChatGroq(groq_api_key=GROQ_API_KEY, model_name=LLM_MODEL, temperature=0.1)
@@ -92,7 +94,6 @@ class RAGChatbot:
     def load_documents(self, pdf_folder=PDF_FOLDER):
         documents = load_pdf_texts(pdf_folder)
         if not documents:
-            # st.error ถูกเรียกใน load_pdf_texts แล้วหาก folder ไม่พบ
             if os.path.exists(pdf_folder) and not glob.glob(f"{pdf_folder}/*.pdf"):
                  st.error(f"⚠️ ไม่พบเอกสาร PDF ในโฟลเดอร์: {pdf_folder}")
             return False
@@ -117,13 +118,14 @@ class RAGChatbot:
             return_source_documents=True
         )
 
-        # --- 2. ConversationalRetrievalChain Setup (แก้ไขข้อผิดพลาด) ---
-        # ลบ chain_type_kwargs={"output_key": "answer"} ออก
+        # --- 2. ConversationalRetrievalChain Setup (แก้ไขข้อผิดพลาด output_key) ---
         self.conversation_chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=self.vector_store.as_retriever(search_kwargs={"k": SEARCH_LIMIT}),
             memory=self.memory,
             return_source_documents=True,
+            # ✅ แก้ไข: กำหนด output_key โดยตรง เพื่อบอก memory ว่าส่วนไหนคือคำตอบ
+            output_key="answer" 
         )
         return True
 
@@ -132,7 +134,7 @@ class RAGChatbot:
         if use_conversation and self.conversation_chain:
             # ใช้ invoke สำหรับ ConversationalRetrievalChain
             result = self.conversation_chain.invoke({"question": question}) 
-            answer = result.get("answer", "ไม่สามารถหาคำตอบได้") # ใช้ .get() เพื่อป้องกัน KeyError
+            answer = result.get("answer", "ไม่สามารถหาคำตอบได้") 
             sources = result.get("source_documents", [])
         else:
             # ใช้ invoke สำหรับ RetrievalQA Chain
@@ -158,28 +160,30 @@ def main():
                 if bot.load_documents():
                     st.session_state.bot = bot
                 else:
-                    # ถ้าโหลดเอกสารล้มเหลว แต่ไม่มีข้อผิดพลาดร้ายแรง (เช่นแค่ไม่มีไฟล์)
                     st.session_state.bot_error = True 
             except Exception as e:
-                # ข้อผิดพลาดร้ายแรงในการเริ่มต้น เช่น API Key หรือโมเดล
                 st.error(f"❌ เกิดข้อผิดพลาดในการเริ่มต้น Chatbot: {e}")
                 st.stop()
     
-    # ถ้ามีการแจ้ง error ในการโหลดเอกสาร (แต่ bot ยังถูกสร้างอยู่)
+    # ถ้ามีการแจ้ง error ในการโหลดเอกสาร หรือ API key ไม่พร้อม
     if "bot_error" in st.session_state and st.session_state.bot_error:
-        # ป้องกันไม่ให้โค้ดส่วนอื่นทำงานหากไม่มี vector_store
         if "bot" in st.session_state and not st.session_state.bot.vector_store:
              st.info("ℹ️ ไม่พบเอกสาร PDF ในโฟลเดอร์ กรุณาเพิ่มไฟล์ PDF ใน `./pdf` เพื่อใช้งาน.")
         return
 
+    # ต้องมั่นใจว่า bot ถูกสร้างและโหลดเอกสารสำเร็จก่อนใช้งาน
+    if "bot" not in st.session_state or not st.session_state.bot.vector_store:
+         # ในกรณีที่ bot ถูกสร้างแต่ไม่มีเอกสาร (ถูกจัดการด้วย bot_error แล้ว)
+         return
+         
     bot = st.session_state.bot
     
     # ------------------ Chat History Display ------------------
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Keep only last 5 messages to reduce token usage
-    if len(st.session_state.messages) > 10: # เพิ่มเป็น 10 เพื่อให้มีบริบทมากขึ้น
+    # Keep only last 10 messages to reduce token usage
+    if len(st.session_state.messages) > 10: 
         st.session_state.messages = st.session_state.messages[-10:]
 
     # Display history messages
@@ -192,6 +196,7 @@ def main():
                         source_path = s.metadata.get("source", "ไม่ระบุ")
                         file_name = os.path.basename(source_path) 
                         st.markdown(f"**ไฟล์:** `{file_name}`")
+                        # แสดงเนื้อหาที่ดึงมาบางส่วน
                         st.write(s.page_content[:300] + "...") 
                         st.markdown("---")
 
@@ -226,7 +231,7 @@ def main():
                     })
                 except Exception as e:
                     st.error(f"❌ เกิดข้อผิดพลาดขณะตอบคำถาม: {e}")
-                    st.session_state.messages.pop() # ลบคำถามล่าสุดออกหากเกิดข้อผิดพลาด
+                    st.session_state.messages.pop() 
 
 if __name__ == "__main__":
     main()
