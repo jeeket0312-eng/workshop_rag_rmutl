@@ -96,8 +96,8 @@ class RAGChatbot:
             llm=self.llm,
             retriever=self.vector_store.as_retriever(search_kwargs={"k": SEARCH_LIMIT}),
             memory=self.memory,
-            return_source_documents=True
-            # chain_type_kwargs={"output_key": "answer"}  # <-- REMOVE THIS LINE
+            return_source_documents=True,
+            chain_type_kwargs={"output_key": "answer"}  # <-- Fix: Explicitly set output_key
         )
         return True
 
